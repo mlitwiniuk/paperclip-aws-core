@@ -15,13 +15,16 @@ module Paperclip
         base.instance_eval do
           @s3_options     = @options[:s3_options]     || {}
 
-          @s3_endpoint    = @options[:s3_endpoint].starts_with?('http') ? @options[:s3_endpoint] : "https://#{@options[:s3_endpoint]}"
+          if @options[:s3_endpoint].present?
+            @s3_endpoint    =  @options[:s3_endpoint].starts_with?('http') ? @options[:s3_endpoint] : "https://#{@options[:s3_endpoint]}"
+          end
 
 
           if @options[:credentials].present?
             credentials = @options[:credentials].symbolize_keys
-            ::Aws::config[:credentials] = ::Aws::Credentials.new(credentials[:access_key_id], credentials[:secret_access_key])
-            ::Aws.config[:region] = credentials[:region]
+            @s3_credentials = ::Aws::Credentials.new(credentials[:access_key_id], credentials[:secret_access_key])
+            @s3_region = credentials[:region]
+            @s3_bucket = credentials[:bucket]
           end
 
           @aws_credentials = @options[:credentials]   || {}
@@ -65,15 +68,12 @@ module Paperclip
         end
       end
 
-      def s3_credentials
-        # @s3_credentials ||= parse_credentials(@options[:s3_credentials])
-      end
-
       def s3_host_name
         host_name = @options[:s3_host_name] ||  "s3.amazonaws.com"
         # host_name = host_name.call(self) if host_name.is_a?(Proc)
         #
         # host_name || s3_credentials[:s3_host_name] || "s3.amazonaws.com"
+        host_name
       end
 
       def s3_host_alias
@@ -88,7 +88,7 @@ module Paperclip
       end
 
       def bucket_name
-        @bucket = @options[:bucket] || s3_credentials[:bucket]
+        @bucket = @options[:bucket] || s3_bucket
         @bucket = @bucket.call(self) if @bucket.respond_to?(:call)
         @bucket or raise ArgumentError, "missing required :bucket option"
       end
@@ -103,13 +103,28 @@ module Paperclip
 
       def obtain_s3_instance_for(options)
         instances = (Thread.current[:paperclip_s3_instances] ||= {})
-        instances[options] ||= s3_endpoint.present? ? ::Aws::S3::Client.new(endpoint: s3_endpoint) : ::Aws.s3
+        client_options = {}
+        client_options[:endpoint] = s3_endpoint if s3_endpoint
+        client_options[:region] = s3_region if s3_region
+        client_options[:credentials] = s3_credentials if s3_credentials
+        instances[options] ||= ::Aws::S3::Client.new(client_options)
       end
 
       def s3_endpoint
         @s3_endpoint
       end
 
+      def s3_credentials
+        @s3_credentials
+      end
+
+      def s3_region
+        @s3_region
+      end
+
+      def s3_bucket
+        @s3_bucket
+      end
 
       def exists?(style = default_style)
         if original_filename
